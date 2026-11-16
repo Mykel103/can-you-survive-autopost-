@@ -20,9 +20,6 @@ GV = os.environ.get("GRAPH_VERSION", "v25.0")
 G = f"https://graph.facebook.com/{GV}"
 TOKEN = os.environ.get("META_PAGE_TOKEN", "")
 PAGE_ID = os.environ.get("FB_PAGE_ID", "")
-REPO = os.environ.get("GITHUB_REPOSITORY", "")
-BRANCH = os.environ.get("GITHUB_REF_NAME", "main")
-MEDIA_BASE = os.environ.get("MEDIA_BASE_URL") or f"https://raw.githubusercontent.com/{REPO}/{BRANCH}/"
 MAX_ATTEMPTS = 3
 HERE = os.path.dirname(os.path.abspath(__file__))
 
@@ -48,10 +45,21 @@ def ig_user_id():
     return iga["id"], iga.get("username"), j.get("name")
 
 
+def _upload(upload_url, rel_path):
+    data = open(os.path.join(HERE, rel_path), "rb").read()
+    r = requests.post(upload_url, data=data, timeout=600,
+                      headers={"Authorization": f"OAuth {TOKEN}", "offset": "0", "file_size": str(len(data))})
+    if r.status_code >= 400:
+        raise RuntimeError(f"upload -> {r.status_code}: {r.text[:400]}")
+
+
 def post_instagram(item, url):
     igid, _, _ = ig_user_id()
-    c = api("POST", f"{igid}/media", media_type="REELS", video_url=url, caption=item["caption"], share_to_feed="true")
+    # Resumable upload straight from the repo checkout: no public video link needed.
+    c = api("POST", f"{igid}/media", media_type="REELS", upload_type="resumable", caption=item["caption"], share_to_feed="true")
     cid = c["id"]
+    up = c.get("uri") or f"https://rupload.facebook.com/ig-api-upload/{GV}/{cid}"
+    _upload(up, item["file"])
     for _ in range(60):  # up to ~10 minutes of processing
         s = api("GET", cid, fields="status_code,status")
         if s.get("status_code") == "FINISHED":
@@ -74,9 +82,7 @@ def post_instagram(item, url):
 def post_facebook(item, url):
     s = api("POST", f"{PAGE_ID}/video_reels", upload_phase="start")
     vid, up = s["video_id"], s["upload_url"]
-    r = requests.post(up, headers={"Authorization": f"OAuth {TOKEN}", "file_url": url}, timeout=300)
-    if r.status_code >= 400:
-        raise RuntimeError(f"facebook upload -> {r.status_code}: {r.text[:400]}")
+    _upload(up, item["file"])
     api("POST", f"{PAGE_ID}/video_reels", upload_phase="finish", video_id=vid, video_state="PUBLISHED", description=item["caption"])
     if item.get("first_comment"):
         for _ in range(12):
@@ -105,13 +111,13 @@ def due(item, now):
 
 
 def post_item(item, state, dry=False):
-    url = MEDIA_BASE + item["file"]
+    url = item["file"]
     st = state.setdefault(item["id"], {})
     for plat in item.get("platforms", ["instagram", "facebook"]):
         rec = st.setdefault(plat, {})
         if rec.get("id") or rec.get("attempts", 0) >= MAX_ATTEMPTS:
             continue
-        print(f"-> {item['id']} to {plat}  ({url})")
+        print(f"-> {item['id']} to {plat}  ({url}, {os.path.getsize(os.path.join(HERE, url)) // 1024} KB)")
         if dry:
             continue
         try:
