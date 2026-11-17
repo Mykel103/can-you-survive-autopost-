@@ -142,6 +142,9 @@ def main():
     if not TOKEN or not PAGE_ID:
         sys.exit("Missing META_PAGE_TOKEN or FB_PAGE_ID secret. See README.md, step 3.")
     queue, state = load("queue.json", []), load("posted.json", {})
+    if os.path.exists(os.path.join(HERE, "PAUSED")) and mode in ("run", "dry-run"):
+        print("Posting is paused (delete the PAUSED file to resume).")
+        return
     if mode == "check":
         igid, user, page = ig_user_id()
         dbg = api("GET", "debug_token", input_token=TOKEN).get("data", {})
