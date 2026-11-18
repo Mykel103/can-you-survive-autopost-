@@ -1,6 +1,6 @@
 # Can You Survive: free auto-poster
 
-This repo posts the channel's videos to **Instagram Reels** and a **Facebook Page** on a schedule, for free.
+This repo posts the channel's videos to **Instagram Reels**, a **Facebook Page** and **TikTok** on a schedule, for free.
 
 - **GitHub Actions** runs `post.py` every hour. That's free for public repos.
 - `post.py` checks `queue.json`. When a video's `post_at` time has passed, it posts that video through Meta's official Graph API.
@@ -9,7 +9,7 @@ This repo posts the channel's videos to **Instagram Reels** and a **Facebook Pag
 
 ## Schedule
 
-All 15 videos are in `queue.json`. One series goes out per day, at 12 PM, 5 PM and 9 PM Eastern:
+All 18 videos are in `queue.json`. One series goes out per day, at 12 PM, 5 PM and 9 PM Eastern:
 
 | Day | Series |
 | --- | --- |
@@ -18,6 +18,9 @@ All 15 videos are in `queue.json`. One series goes out per day, at 12 PM, 5 PM a
 | Thu Nov 19 | Zombies Are Real |
 | Fri Nov 20 | Vampire in Town |
 | Sat Nov 21 | The Sun Goes Out |
+| Sun Nov 22 | Chicago Dice Game (Instagram, Facebook **and TikTok**) |
+
+Each video lists its accounts in `platforms` (`instagram`, `facebook`, `tiktok`). An account that isn't set up yet is skipped, so the rest still post.
 
 To change a time, edit `post_at` in `queue.json`. To add a video, put the MP4 in `videos/` and add an entry to `queue.json`.
 
@@ -55,3 +58,19 @@ To make a real test post, run mode **now** with item `HalfTheMoon_Part1`.
 
 ## If something fails
 Open the run in the **Actions** tab. The error from Meta is printed there, and it's also saved in `posted.json`. Each video gets 3 tries, then the poster moves on.
+
+## TikTok setup (about 15 minutes, free)
+
+**What to expect:** TikTok only lets apps post publicly by themselves after TikTok reviews the app, which takes a few weeks. Until then the poster uses **inbox mode**: at post time the video lands in your TikTok inbox (you get a notification), and you add the caption and tap **Post**. Once TikTok approves your app, it posts by itself.
+
+1. **Make the app.** Go to developers.tiktok.com, log in with the TikTok account, and choose **Manage apps → Connect an app**. Name it anything (for example "CYS Poster") and pick **Web** as the platform.
+2. **Add products.** Add **Login Kit** and **Content Posting API**. In Login Kit, set the redirect URI to `https://github.com/Mykel103/can-you-survive-autopost-`. In Content Posting API, turn on **Direct Post** (needed later). Scopes: `user.info.basic`, `video.upload`, `video.publish`. Use the **Sandbox** tab and add your TikTok account as a target user, so you can use it right away without waiting for review.
+3. **Add three GitHub secrets** (repo **Settings → Secrets and variables → Actions → New repository secret**):
+   - `TIKTOK_CLIENT_KEY`: the Client key from your app page
+   - `TIKTOK_CLIENT_SECRET`: the Client secret from the same page
+   - `TIKTOK_VAULT_KEY`: any long password you make up. It locks your TikTok login so nobody can read it from the public repo.
+4. **Log in once.** Go to **Actions → autopost → Run workflow**, choose mode `tiktok-link` and run it. Open the run's log and tap the link, then log in and tap **Authorize**. TikTok sends you to this repo's GitHub page. Copy that whole page address from the address bar.
+5. **Save the login.** Run the workflow again with mode `tiktok-code`, and paste that address into the **item** box. It's safe: the code inside it works once and expires within minutes.
+6. **Test.** Run mode `tiktok-check`. It should say "TikTok login OK".
+
+**After TikTok approves your app:** in the app page, submit it for review under Content Posting API. Once approved, add a repo **variable** (Settings → Secrets and variables → Actions → **Variables**) named `TIKTOK_MODE` with the value `direct`. From then on, videos post publicly by themselves, with the caption from `queue.json`.

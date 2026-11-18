@@ -1,4 +1,4 @@
-"""Free auto-poster: posts the next due video from queue.json as an Instagram Reel and a Facebook Page Reel.
+"""Free auto-poster: posts the next due video from queue.json as an Instagram Reel, a Facebook Page Reel and a TikTok.
 
 Runs inside GitHub Actions (see .github/workflows/autopost.yml). Uses only Meta's official Graph API.
 
@@ -11,10 +11,15 @@ Modes:
   python post.py dry-run   show what would be posted next, post nothing
   python post.py run       post the next due video (default)
   python post.py now ID    post one queue item immediately, ignoring its time (for a test)
+  python post.py tiktok-link       print the one-time TikTok login link
+  python post.py tiktok-code URL   save the TikTok login (URL = the page TikTok sent you back to)
+  python post.py tiktok-check      test the TikTok login
+TikTok setup and secrets: see tiktok.py and README.md.
 """
 import json, os, sys, time
 from datetime import datetime, timezone
 import requests
+import tiktok
 
 GV = os.environ.get("GRAPH_VERSION", "v25.0")
 G = f"https://graph.facebook.com/{GV}"
@@ -97,6 +102,17 @@ def post_facebook(item, url):
     return vid
 
 
+def ready(plat):
+    if plat == "tiktok":
+        return tiktok.configured()
+    return bool(TOKEN and PAGE_ID)
+
+
+POSTERS = {"instagram": lambda item, url: post_instagram(item, url),
+           "facebook": lambda item, url: post_facebook(item, url),
+           "tiktok": lambda item, url: tiktok.post(item)}
+
+
 def load(name, default):
     p = os.path.join(HERE, name)
     return json.load(open(p)) if os.path.exists(p) else default
@@ -117,11 +133,14 @@ def post_item(item, state, dry=False):
         rec = st.setdefault(plat, {})
         if rec.get("id") or rec.get("attempts", 0) >= MAX_ATTEMPTS:
             continue
+        if not ready(plat):
+            print(f"-> {item['id']} to {plat}: skipped, {plat} is not set up yet")
+            continue
         print(f"-> {item['id']} to {plat}  ({url}, {os.path.getsize(os.path.join(HERE, url)) // 1024} KB)")
         if dry:
             continue
         try:
-            rec["id"] = (post_instagram if plat == "instagram" else post_facebook)(item, url)
+            rec["id"] = POSTERS[plat](item, url)
             rec["posted_at"] = datetime.now(timezone.utc).isoformat()
             rec.pop("error", None)
             print(f"   posted: {rec['id']}")
@@ -134,18 +153,42 @@ def post_item(item, state, dry=False):
 
 def finished(item, state):
     st = state.get(item["id"], {})
-    return all(st.get(p, {}).get("id") or st.get(p, {}).get("attempts", 0) >= MAX_ATTEMPTS for p in item.get("platforms", ["instagram", "facebook"]))
+    # A platform that isn't set up yet doesn't hold up the queue.
+    return all(st.get(p, {}).get("id") or st.get(p, {}).get("attempts", 0) >= MAX_ATTEMPTS or not ready(p)
+               for p in item.get("platforms", ["instagram", "facebook"]))
 
 
 def main():
     mode = sys.argv[1] if len(sys.argv) > 1 else "run"
-    if not TOKEN or not PAGE_ID:
-        sys.exit("Missing META_PAGE_TOKEN or FB_PAGE_ID secret. See README.md, step 3.")
+    if mode == "tiktok-link":
+        if not tiktok.KEY:
+            sys.exit("Add the TIKTOK_CLIENT_KEY secret first. See README.md, TikTok step 3.")
+        print("Open this link, log in to the TikTok account you want to post to, and tap Authorize:")
+        print(tiktok.login_link())
+        print("TikTok then sends you to a GitHub page. Copy that whole page address and run mode tiktok-code with it.")
+        return
+    if mode == "tiktok-code":
+        oid = tiktok.save_code(sys.argv[2])
+        print(f"TikTok login saved for account {str(oid)[:6]}... It's stored encrypted in tiktok_token.enc.")
+        return
+    if mode == "tiktok-check":
+        at = tiktok.access_token()
+        print("TikTok login OK. Posting mode:", tiktok.MODE)
+        try:
+            info = tiktok.creator(at)
+            print("Account: @" + str(info.get("creator_username")), "| allowed privacy:", info.get("privacy_level_options"))
+        except Exception as e:
+            print("(account details not available:", e, ")")
+        return
+    if not (TOKEN and PAGE_ID) and not tiktok.configured():
+        sys.exit("No accounts are set up yet. Add the Meta secrets (README step 3) and/or TikTok (README, TikTok section).")
     queue, state = load("queue.json", []), load("posted.json", {})
     if os.path.exists(os.path.join(HERE, "PAUSED")) and mode in ("run", "dry-run"):
         print("Posting is paused (delete the PAUSED file to resume).")
         return
     if mode == "check":
+        if not (TOKEN and PAGE_ID):
+            sys.exit("Missing META_PAGE_TOKEN or FB_PAGE_ID secret. See README.md, step 3.")
         igid, user, page = ig_user_id()
         dbg = api("GET", "debug_token", input_token=TOKEN).get("data", {})
         print(f"OK. Page: {page} ({PAGE_ID})  Instagram: @{user} ({igid})")

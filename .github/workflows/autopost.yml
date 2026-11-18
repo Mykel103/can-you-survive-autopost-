@@ -6,12 +6,12 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: "check = test the token | dry-run = show next post | run = post if due | now = post one item now"
+        description: "check = test Meta | dry-run = show next post | run = post if due | now = post one item now | tiktok-link, tiktok-code, tiktok-check = TikTok setup"
         default: check
         type: choice
-        options: [check, dry-run, run, now]
+        options: [check, dry-run, run, now, tiktok-link, tiktok-code, tiktok-check]
       item:
-        description: "Queue id for mode 'now' (example: HalfTheMoon_Part1)"
+        description: "Queue id for mode 'now' (example: HalfTheMoon_Part1), or the page address TikTok sent you to, for tiktok-code"
         required: false
         default: ""
 
@@ -25,25 +25,32 @@ concurrency:
 jobs:
   post:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - run: pip install requests
+      - run: pip install requests cryptography
       - name: Post
         env:
           META_PAGE_TOKEN: ${{ secrets.META_PAGE_TOKEN }}
           FB_PAGE_ID: ${{ secrets.FB_PAGE_ID }}
-        run: python post.py ${{ github.event.inputs.mode || 'run' }} ${{ github.event.inputs.item }}
+          TIKTOK_CLIENT_KEY: ${{ secrets.TIKTOK_CLIENT_KEY }}
+          TIKTOK_CLIENT_SECRET: ${{ secrets.TIKTOK_CLIENT_SECRET }}
+          TIKTOK_VAULT_KEY: ${{ secrets.TIKTOK_VAULT_KEY }}
+          TIKTOK_MODE: ${{ vars.TIKTOK_MODE }}
+          MODE: ${{ github.event.inputs.mode || 'run' }}
+          ITEM: ${{ github.event.inputs.item }}
+        run: python post.py "$MODE" "$ITEM"
       - name: Save what was posted
         if: always()
         run: |
-          if ! git diff --quiet posted.json; then
+          git add posted.json
+          [ -f tiktok_token.enc ] && git add tiktok_token.enc
+          if ! git diff --cached --quiet; then
             git config user.name "autopost-bot"
             git config user.email "autopost-bot@users.noreply.github.com"
-            git add posted.json
             git commit -m "posted: update log"
             git push
           fi
